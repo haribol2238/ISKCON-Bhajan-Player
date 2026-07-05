@@ -22,6 +22,7 @@ object AudioPlayerManager {
     private var mediaPlayer: MediaPlayer? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var progressJob: Job? = null
+    private var preparationTimeoutJob: Job? = null
 
     private val _currentTrack = MutableStateFlow<DevotionalVideo?>(null)
     val currentTrack: StateFlow<DevotionalVideo?> = _currentTrack
@@ -56,6 +57,7 @@ object AudioPlayerManager {
                 )
                 setOnPreparedListener { mp ->
                     Log.d(TAG, "MediaPlayer Prepared. Starting playback.")
+                    preparationTimeoutJob?.cancel()
                     _playbackState.value = PlaybackState.PLAYING
                     _duration.value = mp.duration.toLong()
                     mp.start()
@@ -63,6 +65,7 @@ object AudioPlayerManager {
                 }
                 setOnCompletionListener {
                     Log.d(TAG, "MediaPlayer Completed track.")
+                    preparationTimeoutJob?.cancel()
                     _playbackState.value = PlaybackState.IDLE
                     _currentPosition.value = 0L
                     stopProgressTracker()
@@ -70,6 +73,7 @@ object AudioPlayerManager {
                 }
                 setOnErrorListener { _, what, extra ->
                     Log.e(TAG, "MediaPlayer Error occurred. What: $what, Extra: $extra")
+                    preparationTimeoutJob?.cancel()
                     _playbackState.value = PlaybackState.ERROR
                     _errorMessage.value = "Streaming error ($what). Trying fallback..."
                     stopProgressTracker()
@@ -91,6 +95,25 @@ object AudioPlayerManager {
                 _duration.value = if (track.lengthSeconds > 0) track.lengthSeconds * 1000L else 0L
 
                 stopProgressTracker()
+                preparationTimeoutJob?.cancel()
+
+                // Launch 8-second safety timeout for stream preparation
+                preparationTimeoutJob = scope.launch {
+                    delay(8000)
+                    if (_playbackState.value == PlaybackState.LOADING) {
+                        Log.w(TAG, "Media preparation timed out (8s). Forcing automatic server rotation fallback...")
+                        withContext(Dispatchers.IO) {
+                            try {
+                                mediaPlayer?.reset()
+                            } catch (ex: Exception) {
+                                Log.e(TAG, "Error resetting player on timeout", ex)
+                            }
+                        }
+                        _playbackState.value = PlaybackState.ERROR
+                        _errorMessage.value = "Server timed out. Retrying with alternate node..."
+                        onErrorOccurred?.invoke(-1, -1)
+                    }
+                }
 
                 // Reset and prepare MediaPlayer on IO thread
                 withContext(Dispatchers.IO) {

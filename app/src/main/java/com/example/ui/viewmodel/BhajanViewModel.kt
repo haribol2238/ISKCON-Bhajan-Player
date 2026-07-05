@@ -158,6 +158,7 @@ class BhajanViewModel(application: Application) : AndroidViewModel(application) 
             playAttemptCount++
             Log.w(TAG, "Playback failed. Rotating server and retrying (attempt $playAttemptCount)...")
             streamManager.rotateInstance()
+            streamManager.rotatePipedInstance()
             executePlayWithStream(track)
         } else {
             Log.e(TAG, "All play attempts failed for track ${track.title}.")

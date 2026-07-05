@@ -49,6 +49,19 @@ data class VideoDetailsResponse(
     val adaptiveFormats: List<AdaptiveFormat>? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class PipedAudioStream(
+    val url: String? = null,
+    val format: String? = null,
+    val bitrate: Int? = null,
+    val mimeType: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class PipedStreamsResponse(
+    val audioStreams: List<PipedAudioStream>? = null
+)
+
 interface InvidiousApi {
     @GET("api/v1/search")
     suspend fun searchVideos(
@@ -60,4 +73,11 @@ interface InvidiousApi {
     suspend fun getVideoDetails(
         @Path("videoId") videoId: String
     ): VideoDetailsResponse
+}
+
+interface PipedApi {
+    @GET("streams/{videoId}")
+    suspend fun getStreams(
+        @Path("videoId") videoId: String
+    ): PipedStreamsResponse
 }

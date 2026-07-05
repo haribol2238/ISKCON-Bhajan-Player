@@ -24,6 +24,17 @@ class DevotionalStreamManager {
             "https://iv.melmac.space/"
         )
 
+        // Rotating list of public Piped instances for direct unthrottled streaming proxy
+        val PIPED_INSTANCES = listOf(
+            "https://pipedapi.kavin.rocks/",
+            "https://piped-api.lunar.icu/",
+            "https://api.piped.yt/",
+            "https://pipedapi.colby.cafe/",
+            "https://piped-api.us.projectsegfau.lt/",
+            "https://piped-api.privacy.com.de/",
+            "https://piped-api.garudalinux.org/"
+        )
+
         // Whitelisted ISKCON Channel IDs
         val ISKCON_CHANNEL_WHITELIST = setOf(
             "UC1t_sZ7X5fL6u_FshPebgXg", // ISKCON Desire Tree
@@ -57,13 +68,22 @@ class DevotionalStreamManager {
     }
 
     private var activeInstanceIndex = 0
+    private var activePipedIndex = 0
 
     val activeInstanceUrl: String
         get() = PUBLIC_INSTANCES[activeInstanceIndex]
 
+    val activePipedUrl: String
+        get() = PIPED_INSTANCES[activePipedIndex]
+
     fun rotateInstance() {
         activeInstanceIndex = (activeInstanceIndex + 1) % PUBLIC_INSTANCES.size
         Log.d(TAG, "Rotating to new Invidious instance: ${activeInstanceUrl}")
+    }
+
+    fun rotatePipedInstance() {
+        activePipedIndex = (activePipedIndex + 1) % PIPED_INSTANCES.size
+        Log.d(TAG, "Rotating to new Piped instance: ${activePipedUrl}")
     }
 
     private fun getApiClient(baseUrl: String): InvidiousApi {
@@ -80,6 +100,22 @@ class DevotionalStreamManager {
             .build()
 
         return retrofit.create(InvidiousApi::class.java)
+    }
+
+    private fun getPipedApiClient(baseUrl: String): com.example.data.network.PipedApi {
+        val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
+            .build()
+
+        val retrofit = Retrofit.Builder()
+            .baseUrl(baseUrl)
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create())
+            .build()
+
+        return retrofit.create(com.example.data.network.PipedApi::class.java)
     }
 
     /**
@@ -207,9 +243,44 @@ class DevotionalStreamManager {
 
     /**
      * Requirement 4: Extract audio-only stream.
-     * Tries to find the audio stream directly, or returns the proxy stream URL.
+     * Tries to find the audio stream directly via Piped, falling back to Invidious if needed.
      */
     suspend fun getAudioStreamUrl(videoId: String): String {
+        // 1. Try Piped API first for super high-performance, unthrottled, proxied audio streams
+        var pipedAttempts = 0
+        val maxPipedAttempts = 3
+        while (pipedAttempts < maxPipedAttempts) {
+            val pipedUrl = activePipedUrl
+            try {
+                Log.d(TAG, "Attempting stream extraction from Piped instance: $pipedUrl for video $videoId")
+                val pipedClient = getPipedApiClient(pipedUrl)
+                val streams = pipedClient.getStreams(videoId)
+                val audioList = streams.audioStreams ?: emptyList()
+                
+                // Prioritize M4A/MP4 format as it is universally playable by Android MediaPlayer
+                val bestStream = audioList.find { 
+                    val format = it.format ?: ""
+                    val mime = it.mimeType ?: ""
+                    format.equals("m4a", ignoreCase = true) || mime.contains("m4a") || mime.contains("mp4")
+                } ?: audioList.find { 
+                    val mime = it.mimeType ?: ""
+                    mime.startsWith("audio/") 
+                } ?: audioList.firstOrNull()
+
+                if (bestStream?.url != null) {
+                    val streamUrl = bestStream.url!!
+                    Log.d(TAG, "Successfully extracted direct unthrottled stream via Piped: $streamUrl")
+                    return streamUrl
+                }
+            } catch (ex: Exception) {
+                Log.w(TAG, "Piped extraction failed on $pipedUrl: ${ex.message}. Rotating Piped instance...")
+                rotatePipedInstance()
+                pipedAttempts++
+            }
+        }
+
+        // 2. Fall back to Invidious extractor if Piped is unavailable
+        Log.i(TAG, "Piped instances exhausted or failed. Falling back to Invidious parsing.")
         var attempts = 0
         val maxAttempts = 3 // try up to 3 rotating instances
 
