@@ -1,0 +1,6 @@
+{
+  "name": "ISKCON Bhajan Player",
+  "description": "Distraction-free, de-Googled audio streaming application for ISKCON Bhajans, Devotional Music, and Kirtans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
